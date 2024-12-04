@@ -1,38 +1,82 @@
-import tkinter as tk
-import customtkinter as ctk
-from PIL import ImageTk
+import base64
+import io
+
 import torch
 from diffusers import StableDiffusionPipeline
-from torch.cuda.amp import autocast
+from flask import Flask, jsonify, request
+from PIL import Image
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
-# Create app
-app = tk.Tk()
-app.geometry("532x642")
-app.title("Stable Images")
-ctk.set_appearance_mode("dark")
+# Initialize Flask app
+app = Flask(__name__)
 
-prompt = ctk.CTkEntry(height=40, width=512, text_font=("Arial", 20), text_color="black", fg_color="white")
-prompt.place(x=10, y=10)
+# Load models
+conversation_model_name = "microsoft/DialoGPT-small"
+tokenizer = AutoTokenizer.from_pretrained(conversation_model_name)
+conversation_model = AutoModelForCausalLM.from_pretrained(conversation_model_name)
 
-lmain = ctk.CTkLabel(height=512, width=512)
-lmain.place(x=10, y=10)
+emotion_detector = pipeline(
+    "text-classification",
+    model="j-hartmann/emotion-english-distilroberta-base",
+    return_all_scores=True,
+)
 
-modelid = 'CompVis/stable-diffusion-v1-4'
-pipe = StableDiffusionPipeline.from_pretrained(modelid, revision="fp16", torch_dtype=torch.float16, use_auth="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")
-device = "cpu"
-pipe.to(device)
+# Load Stable Diffusion model
+sd_model_id = "CompVis/stable-diffusion-v1-4"
+sd_pipe = StableDiffusionPipeline.from_pretrained(
+    sd_model_id,
+    revision="fp16",
+    torch_dtype=torch.float16,
+    use_auth_token="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",
+)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+sd_pipe.to(device)
 
-def generate():
-    with autocast(device):
-        image = pipe(prompt.get(), guidance_scale=8.5)["sample"][0]
-    image.save("generatedImage.png")
-    img = ImageTk.PhotoImage(image)
 
-    lmain.configure(image=img)
-    lmain.image = img  # Keep a reference to prevent image from being garbage collected
+# Detect emotion from text
+def detect_emotion(input_text):
+    emotions = emotion_detector(input_text)
+    highest_emotion = max(emotions[0], key=lambda x: x["score"])
+    return highest_emotion["label"]
 
-trigger = ctk.CTkButton(height=40, width=120, text_font=("Arial", 20), text_color="white", fg_color="blue", command=generate)
-trigger.configure(text="Generate")
-trigger.place(x=206, y=60)
 
-app.mainloop()
+# Generate an image based on the emotion
+def generate_image(emotion):
+    prompts = {
+        "joy": "a vibrant and colorful scene filled with happiness and laughter",
+        "sadness": "a serene, peaceful landscape with soft colors",
+        "anger": "a dramatic storm with intense lighting and dark clouds",
+        "fear": "a mysterious forest at night with a hint of eeriness",
+        "surprise": "a spectacular fireworks display in a clear night sky",
+        "love": "a warm sunset over a romantic beach setting",
+    }
+    prompt = prompts.get(emotion, "a generic serene landscape")
+    image = sd_pipe(prompt, guidance_scale=8.5)["sample"][0]
+    return image
+
+
+@app.route("/generate_emotion_image", methods=["POST"])
+def generate_emotion_image():
+    data = request.get_json()
+    if "text" not in data:
+        return jsonify({"error": "No text provided"}), 400
+
+    input_text = data["text"]
+    # Detect emotion
+    emotion = detect_emotion(input_text)
+
+    # Generate image based on emotion
+    image = generate_image(emotion)
+
+    # Convert image to base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    image_base64 = base64.b64encode(buffer.getvalue()).decode()
+
+    return jsonify(
+        {"input_text": input_text, "detected_emotion": emotion, "image": image_base64}
+    )
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
