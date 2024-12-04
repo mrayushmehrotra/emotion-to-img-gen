@@ -30,3 +30,20 @@ pip install flask transformers diffusers torch pillow
 python3 app.py
 ```
 
+
+
+## Example Request in curl
+```bash
+curl -X POST http://127.0.0.1:5000/generate_emotion_image \
+-H "Content-Type: application/json" \
+-d '{"text": "I feel so happy and excited today!"}'
+```
+
+## Example Response 
+```bash 
+{
+  "input_text": "I feel so happy and excited today!",
+  "detected_emotion": "joy",
+  "image": "data:image/png;base64,<base64-encoded-image>"
+}
+```
