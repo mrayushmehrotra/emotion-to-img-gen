@@ -1,1 +1,1 @@
-auth_token ="<auth token>"
+auth_token ="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"
